@@ -4,22 +4,24 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#172033" />
   <title>Whisper base.en FP32 vs Parakeet v2 INT8 + Hotwords</title>
+  <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="./src/style.css" />
 </head>
 <body>
   <main class="shell">
     <header>
-      <p class="eyebrow">v8 · zéro compilation sherpa côté utilisateur · Browser CPU</p>
+      <p class="eyebrow">v9 · GitHub-ready · sherpa-onnx officiel 1.13.5 · Browser CPU</p>
       <h1>Whisper base.en <span>vs</span> Parakeet v2 INT8</h1>
-      <p class="lede">Même audio micro, mono 16 kHz. Whisper tourne via Transformers.js/WASM. Parakeet utilise un runtime sherpa-onnx WebAssembly précompilé chargé depuis CDN, avec <code>modified_beam_search</code> + hotwords.</p>
+      <p class="lede">Même audio micro, mono 16 kHz. Whisper tourne via Transformers.js/WASM. Parakeet utilise sherpa-onnx WebAssembly 1.13.5, compilé automatiquement par GitHub Actions avec <code>modified_beam_search</code> + contextual biasing.</p>
     </header>
 
     <section class="panel architecture">
-      <div><strong>Runtime Parakeet</strong><span>CDN jsDelivr · précompilé</span></div>
-      <div><strong>Poids Parakeet</strong><span>Hugging Face · ~661 MB</span></div>
+      <div><strong>Runtime Parakeet</strong><span>sherpa-onnx 1.13.5 officiel</span></div>
+      <div><strong>Build</strong><span>GitHub Actions, jamais sur ton PC</span></div>
+      <div><strong>Poids Parakeet</strong><span>INT8 · ~661 MB</span></div>
       <div><strong>Audio</strong><span>reste dans le navigateur</span></div>
-      <div><strong>Build sherpa local</strong><span>aucun</span></div>
     </section>
 
     <section class="controls panel">
@@ -36,7 +38,7 @@
     <section class="panel hotwords-panel">
       <div>
         <h2>Contextual biasing Parakeet</h2>
-        <p>Un mot ou une expression par ligne. Le score global est appliqué par token pendant <code>modified_beam_search</code>.</p>
+        <p>Un mot ou une expression par ligne. Si la liste est vide, Parakeet repasse automatiquement en <code>greedy_search</code>. Sinon il utilise <code>modified_beam_search</code>.</p>
       </div>
       <textarea id="hotwords" rows="5" spellcheck="false">KUBERNETES
 POSTGRESQL
@@ -51,7 +53,7 @@ MCALLISTER</textarea>
         <progress id="parakeetProgress" max="100" value="0"></progress>
         <span id="parakeetProgressText">Runtime non chargé</span>
       </div>
-      <p id="parakeetDetail" class="note">Premier chargement : runtime WASM + ~661 MB de poids. Le navigateur peut ensuite réutiliser son cache HTTP. La liste de hotwords peut être changée sans retélécharger les modèles.</p>
+      <p id="parakeetDetail" class="note">Au premier chargement, le navigateur récupère le bundle sherpa-onnx + modèle depuis ce même site GitHub Pages. Les chargements suivants peuvent bénéficier du cache HTTP du navigateur.</p>
     </section>
 
     <section class="grid">
@@ -60,7 +62,7 @@ MCALLISTER</textarea>
           <div><p class="tag">Baseline</p><h2>Whisper base.en · FP32</h2></div>
           <span id="whisperStatus" class="status idle">chargement…</span>
         </div>
-        <p class="meta">Transformers.js · ONNX Runtime WebAssembly · CPU · anglais</p>
+        <p class="meta">Transformers.js · ONNX Runtime WebAssembly · CPU · English-only</p>
         <div class="metrics">
           <div><span>Temps inférence</span><strong id="whisperTime">—</strong></div>
           <div><span>RTF</span><strong id="whisperRtf">—</strong></div>
@@ -72,10 +74,10 @@ MCALLISTER</textarea>
 
       <article class="engine-card">
         <div class="engine-head">
-          <div><p class="tag">Expérimental · Context biasing</p><h2>Parakeet-TDT 0.6B v2 · INT8</h2></div>
+          <div><p class="tag">Context biasing</p><h2>Parakeet-TDT 0.6B v2 · INT8</h2></div>
           <span id="parakeetStatus" class="status idle">non chargé</span>
         </div>
-        <p class="meta">sherpa-onnx WASM précompilé · NeMo TDT · English-only · CPU</p>
+        <p class="meta">sherpa-onnx 1.13.5 WASM · NeMo TDT · English-only · CPU</p>
         <div class="metrics">
           <div><span>Temps inférence</span><strong id="parakeetTime">—</strong></div>
           <div><span>RTF</span><strong id="parakeetRtf">—</strong></div>
@@ -88,9 +90,9 @@ MCALLISTER</textarea>
 
     <section class="panel footnotes">
       <h2>Déploiement</h2>
-      <p>Pour GitHub Pages : pousse ce dossier dans un dépôt et active <strong>Settings → Pages → GitHub Actions</strong>. Le workflow fourni génère automatiquement le petit <code>bpe.vocab</code> nécessaire aux hotwords puis publie le site. Il ne compile pas sherpa-onnx.</p>
+      <p>Dépose simplement tout ce projet dans ton dépôt GitHub et pousse sur <code>main</code>. Le workflow <code>.github/workflows/pages.yml</code> construit sherpa-onnx 1.13.5, prépare Parakeet v2 INT8, construit le frontend puis publie GitHub Pages.</p>
       <p><strong>RTF</strong> = temps de calcul / durée audio. Un RTF de 0,20 signifie que 10 s d'audio prennent ~2 s à transcrire.</p>
-      <p class="note">Parakeet/hotwords reste marqué expérimental ici parce que le runtime navigateur précompilé utilisé est une intégration WebAssembly tierce autour de sherpa-onnx. Le modèle et le contextual biasing restent locaux après téléchargement.</p>
+      <p class="note">Le modèle Parakeet v2 est sous licence CC-BY-4.0. Les attributions et versions sont indiquées dans <code>THIRD_PARTY_NOTICES.md</code>.</p>
     </section>
   </main>
   <script type="module" src="./src/app.js"></script>

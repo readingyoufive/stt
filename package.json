@@ -1,6 +1,6 @@
 {
-  "name": "whisper-vs-parakeet-browser-v8",
-  "version": "8.0.0",
+  "name": "whisper-vs-parakeet-browser-v9",
+  "version": "9.0.0",
   "private": true,
   "type": "module",
   "scripts": {
