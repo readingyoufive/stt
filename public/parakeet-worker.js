@@ -85,7 +85,20 @@ function ensureRecognizer(hotwordsText, score) {
   recognizer = null;
 
   if (useHotwords) {
-    Module.FS.writeFile('/hotwords.txt', `${normalized}\n`);
+    // Emscripten's FS is a global in the classic WASM bundle. It is not
+    // guaranteed to be attached as Module.FS unless explicitly exported.
+    const emscriptenFS =
+      Module?.FS ||
+      self.FS ||
+      (typeof FS !== 'undefined' ? FS : null);
+
+    if (!emscriptenFS?.writeFile) {
+      throw new Error(
+        'Le runtime sherpa-onnx est chargé mais Emscripten FS.writeFile n\'est pas exposé. ' +
+        'Vérifie que le bundle WASM v1.13.5 a été construit avec le wrapper officiel.'
+      );
+    }
+    emscriptenFS.writeFile('/hotwords.txt', `${normalized}\n`);
   }
 
   const config = {
