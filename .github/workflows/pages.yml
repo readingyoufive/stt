@@ -168,6 +168,15 @@ jobs:
           cp -a .cache/parakeet-runtime/. public/parakeet-sherpa/
           ls -lh public/parakeet-sherpa
 
+      - name: Upload downloadable Parakeet WASM runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: sherpa-parakeet-runtime
+          path: .cache/parakeet-runtime/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
       - name: Install frontend dependencies
         run: npm install --no-audit --no-fund
 
