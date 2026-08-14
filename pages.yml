@@ -1,0 +1,212 @@
+name: Build STT demo and deploy Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  SHERPA_VERSION: v1.13.5
+  EMSDK_VERSION: 4.0.23
+  PARAKEET_MODEL: sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8
+  PARAKEET_MODEL_URL: https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2
+  PARAKEET_NEMO_URL: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2/resolve/main/parakeet-tdt-0.6b-v2.nemo?download=true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+
+      - name: Restore prebuilt Parakeet WASM cache
+        id: runtime-cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/parakeet-runtime
+          key: parakeet-wasm-${{ env.SHERPA_VERSION }}-tdt-v2-int8-hotwords-v1
+
+      - name: Restore BPE vocab cache
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
+        id: bpe-cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/parakeet-bpe
+          key: parakeet-v2-bpe-${{ hashFiles('scripts/generate_bpe_vocab.py') }}
+
+      - name: Install build prerequisites
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake git curl ca-certificates bzip2 \
+            python3 python3-venv python3-pip
+
+      - name: Download sherpa-onnx and Parakeet INT8
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf .sherpa-build
+          mkdir -p .sherpa-build
+          git clone --depth 1 --branch "$SHERPA_VERSION" \
+            https://github.com/k2-fsa/sherpa-onnx.git .sherpa-build/sherpa-onnx
+
+          curl -L --fail --retry 5 --retry-delay 3 \
+            -o .sherpa-build/parakeet.tar.bz2 "$PARAKEET_MODEL_URL"
+          tar -xjf .sherpa-build/parakeet.tar.bz2 -C .sherpa-build
+          test -d ".sherpa-build/$PARAKEET_MODEL"
+
+      - name: Prepare exact BPE vocab for hotwords
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p .cache/parakeet-bpe
+          MODEL_DIR=".sherpa-build/$PARAKEET_MODEL"
+
+          # If a future official model package ships bpe.vocab, prefer it.
+          if [ -f "$MODEL_DIR/bpe.vocab" ]; then
+            cp "$MODEL_DIR/bpe.vocab" .cache/parakeet-bpe/bpe.vocab
+          fi
+
+          if [ ! -s .cache/parakeet-bpe/bpe.vocab ]; then
+            echo "bpe.vocab is not in the INT8 package; extracting exact SentencePiece scores from NVIDIA .nemo"
+            curl -L --fail --retry 5 --retry-delay 3 \
+              -o .sherpa-build/parakeet-v2.nemo "$PARAKEET_NEMO_URL"
+            python3 -m venv .sherpa-build/bpe-venv
+            .sherpa-build/bpe-venv/bin/pip install --disable-pip-version-check sentencepiece
+            .sherpa-build/bpe-venv/bin/python scripts/generate_bpe_vocab.py \
+              .sherpa-build/parakeet-v2.nemo .cache/parakeet-bpe/bpe.vocab
+            rm -f .sherpa-build/parakeet-v2.nemo
+          fi
+
+          test -s .cache/parakeet-bpe/bpe.vocab
+          head -n 3 .cache/parakeet-bpe/bpe.vocab
+
+      - name: Populate sherpa WASM assets
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          SHERPA=.sherpa-build/sherpa-onnx
+          MODEL_DIR=".sherpa-build/$PARAKEET_MODEL"
+          ASSETS="$SHERPA/wasm/vad-asr/assets"
+          mkdir -p "$ASSETS"
+          find "$ASSETS" -maxdepth 1 -type f ! -name README.md -delete
+
+          cp "$MODEL_DIR/encoder.int8.onnx" "$ASSETS/encoder.int8.onnx"
+          cp "$MODEL_DIR/decoder.int8.onnx" "$ASSETS/decoder.int8.onnx"
+          cp "$MODEL_DIR/joiner.int8.onnx" "$ASSETS/joiner.int8.onnx"
+          cp "$MODEL_DIR/tokens.txt" "$ASSETS/tokens.txt"
+          cp .cache/parakeet-bpe/bpe.vocab "$ASSETS/bpe.vocab"
+
+          curl -L --fail --retry 5 --retry-delay 3 \
+            -o "$ASSETS/silero_vad.onnx" \
+            https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
+
+          ls -lh "$ASSETS"
+
+      - name: Install Emscripten 4.0.23
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git .sherpa-build/emsdk
+          .sherpa-build/emsdk/emsdk install "$EMSDK_VERSION"
+          .sherpa-build/emsdk/emsdk activate "$EMSDK_VERSION"
+
+      - name: Build official sherpa-onnx 1.13.5 WASM bundle
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          source .sherpa-build/emsdk/emsdk_env.sh
+          cd .sherpa-build/sherpa-onnx
+          ./build-wasm-simd-vad-asr.sh
+
+          OUT=build-wasm-simd-vad-asr/install/bin/wasm/vad-asr
+          test -s "$OUT/sherpa-onnx-asr.js"
+          test -s "$OUT/sherpa-onnx-wasm-main-vad-asr.js"
+          test -s "$OUT/sherpa-onnx-wasm-main-vad-asr.wasm"
+          test -s "$OUT/sherpa-onnx-wasm-main-vad-asr.data"
+
+          mkdir -p ../../.cache/parakeet-runtime
+          cp "$OUT/sherpa-onnx-asr.js" ../../.cache/parakeet-runtime/
+          cp "$OUT/sherpa-onnx-wasm-main-vad-asr.js" ../../.cache/parakeet-runtime/
+          cp "$OUT/sherpa-onnx-wasm-main-vad-asr.wasm" ../../.cache/parakeet-runtime/
+          cp "$OUT/sherpa-onnx-wasm-main-vad-asr.data" ../../.cache/parakeet-runtime/
+          printf '%s\n' \
+            "sherpa-onnx=$SHERPA_VERSION" \
+            "model=$PARAKEET_MODEL" \
+            "decoding=modified_beam_search" \
+            "hotwords=bpe.vocab + hotwords_file" \
+            > ../../.cache/parakeet-runtime/VERSION.txt
+
+      - name: Install generated runtime into site
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -s .cache/parakeet-runtime/sherpa-onnx-wasm-main-vad-asr.data
+          rm -rf public/parakeet-sherpa
+          mkdir -p public/parakeet-sherpa
+          cp -a .cache/parakeet-runtime/. public/parakeet-sherpa/
+          ls -lh public/parakeet-sherpa
+
+      - name: Install frontend dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Validate JavaScript
+        run: |
+          node --check src/app.js
+          node --check src/whisper-worker.js
+          node --check public/parakeet-worker.js
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Verify Pages artifact
+        shell: bash
+        run: |
+          set -euxo pipefail
+          test -s dist/index.html
+          test -s dist/parakeet-worker.js
+          test -s dist/parakeet-sherpa/sherpa-onnx-asr.js
+          test -s dist/parakeet-sherpa/sherpa-onnx-wasm-main-vad-asr.js
+          test -s dist/parakeet-sherpa/sherpa-onnx-wasm-main-vad-asr.wasm
+          test -s dist/parakeet-sherpa/sherpa-onnx-wasm-main-vad-asr.data
+          du -sh dist
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
