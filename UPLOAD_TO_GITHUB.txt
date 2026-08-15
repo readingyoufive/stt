@@ -1,17 +1,19 @@
-STT v10 WORKERFS — upload GitHub
+STT v10.4 WORKERFS — ARCHIVE COMPLETE
 
 1. Dézipper cette archive.
-2. Déposer TOUT le contenu à la racine du dépôt, y compris le dossier .github.
-3. Commit/push sur main.
-4. GitHub > Settings > Pages > Source : GitHub Actions.
-5. GitHub > Actions > ouvrir "Build STT demo and deploy Pages".
+2. Remplacer le contenu de ton dépôt par TOUT le contenu extrait.
+3. IMPORTANT : vérifier que ce fichier existe sur GitHub :
+   .github/workflows/pages.yml
+4. Il ne doit PAS y avoir de pages.yml à la racine du dépôt.
+5. Commit/push sur main.
+6. GitHub > Settings > Pages > Source : GitHub Actions.
+7. GitHub > Actions > attendre que "Build STT demo and deploy Pages" soit entièrement vert.
 
-Le premier build :
-- télécharge Parakeet v2 INT8 ;
-- compile sherpa-onnx 1.13.5 avec WORKERFS ;
-- publie le runtime .js/.wasm/.data séparément des trois fichiers ONNX ;
-- déploie le site.
+Cette v10.4 force une nouvelle clé de cache : workerfs-v10.4.
+Le workflow exporte FS uniquement et lie WORKERFS avec -lworkerfs.js.
+WORKERFS est utilisé côté navigateur via FS.filesystems.WORKERFS.
 
-Aucune compilation n'est nécessaire sur le PC utilisateur.
-
-V10.1: remplacez tous les fichiers de la v10 puis commit/push sur main. Le runtime sherpa est reconstruit car la cle de cache a change.
+Le build refuse de déployer si :
+- WORKERFS n'est pas présent dans le runtime généré ;
+- le .data dépasse 50 MB ;
+- les poids ONNX ont été ré-embarqués accidentellement dans le .data.

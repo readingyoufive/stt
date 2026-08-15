@@ -1,6 +1,6 @@
 /*
  * Parakeet-TDT 0.6B v2 INT8 + contextual biasing.
- * v10: the large ONNX files are NOT preloaded into Emscripten MEMFS.
+ * v10.4: the large ONNX files are NOT preloaded into Emscripten MEMFS.
  * They are fetched as browser Blobs and mounted read-only through WORKERFS.
  */
 
@@ -57,7 +57,7 @@ function resolveWorkerFs() {
     const backends = Object.keys(fs?.filesystems || {}).join(', ') || '(aucun)';
     throw new Error(
       'WORKERFS n’est pas disponible dans ce runtime. Backends FS détectés: ' + backends + '. ' +
-      'Le runtime doit être lié avec -lworkerfs.js. Recharge la page après le nouveau déploiement v10.1.'
+      'Le runtime doit être lié avec -lworkerfs.js. Recharge la page après le nouveau déploiement v10.4.'
     );
   }
 
