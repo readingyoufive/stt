@@ -1,7 +1,7 @@
 /*
  * Parakeet-TDT 0.6B v2 INT8 + contextual biasing.
- * v10.4: the large ONNX files are NOT preloaded into Emscripten MEMFS.
- * They are fetched as browser Blobs and mounted read-only through WORKERFS.
+ * v10.6: no Emscripten .data package. ONNX + tokenizer/support files
+ * are fetched as browser Blobs and mounted read-only through WORKERFS.
  */
 
 const APP_BASE = new URL('./', self.location.href);
@@ -9,9 +9,12 @@ const RUNTIME_BASE = new URL('parakeet-sherpa/', APP_BASE);
 const MODEL_BASE = new URL('parakeet-model/', APP_BASE);
 
 const MODEL_FILES = [
-  { name: 'encoder.int8.onnx', label: 'encoder INT8' },
-  { name: 'decoder.int8.onnx', label: 'decoder INT8' },
-  { name: 'joiner.int8.onnx', label: 'joiner INT8' },
+  { name: 'encoder.int8.onnx', label: 'encoder INT8', base: MODEL_BASE },
+  { name: 'decoder.int8.onnx', label: 'decoder INT8', base: MODEL_BASE },
+  { name: 'joiner.int8.onnx', label: 'joiner INT8', base: MODEL_BASE },
+  { name: 'tokens.txt', label: 'tokens', base: RUNTIME_BASE },
+  { name: 'bpe.vocab', label: 'BPE vocab', base: RUNTIME_BASE },
+  { name: 'silero_vad.onnx', label: 'Silero VAD', base: RUNTIME_BASE },
 ];
 
 let runtimeReady = false;
@@ -57,7 +60,7 @@ function resolveWorkerFs() {
     const backends = Object.keys(fs?.filesystems || {}).join(', ') || '(aucun)';
     throw new Error(
       'WORKERFS n’est pas disponible dans ce runtime. Backends FS détectés: ' + backends + '. ' +
-      'Le runtime doit être lié avec -lworkerfs.js. Recharge la page après le nouveau déploiement v10.4.'
+      'Le runtime doit être lié avec -lworkerfs.js. Recharge la page après le nouveau déploiement v10.6.'
     );
   }
 
@@ -118,7 +121,7 @@ function waitForRuntime(timeoutMs = 300000) {
 }
 
 async function fetchModelBlob(file) {
-  const url = new URL(file.name, MODEL_BASE).href;
+  const url = new URL(file.name, file.base || MODEL_BASE).href;
   const t0 = performance.now();
   postStatus(`ouverture ${file.label}…`, 'busy', { phase: 'model', file: file.name });
 
@@ -150,13 +153,10 @@ async function mountExternalModel() {
     const fs = resolveFs();
     const workerFs = resolveWorkerFs();
 
-    // Load the large encoder first; decoder/joiner are small and can be fetched together afterwards.
+    // Load the large encoder first; all remaining files can be fetched together.
     const encoder = await fetchModelBlob(MODEL_FILES[0]);
-    const [decoder, joiner] = await Promise.all([
-      fetchModelBlob(MODEL_FILES[1]),
-      fetchModelBlob(MODEL_FILES[2]),
-    ]);
-    const blobs = [encoder, decoder, joiner];
+    const rest = await Promise.all(MODEL_FILES.slice(1).map(fetchModelBlob));
+    const blobs = [encoder, ...rest];
 
     postStatus('montage WORKERFS des poids ONNX…', 'busy', { phase: 'mount' });
     try { fs.mkdir('/models'); } catch {}
@@ -227,14 +227,14 @@ function ensureRecognizer(hotwordsText, score) {
         decoder: '/models/decoder.int8.onnx',
         joiner: '/models/joiner.int8.onnx',
       },
-      // Small text assets remain preloaded in the tiny .data bundle.
-      tokens: './tokens.txt',
+      // Tokenizer/support files are mounted through WORKERFS too.
+      tokens: '/models/tokens.txt',
       numThreads: 1,
       debug: 0,
       provider: 'cpu',
       modelType: 'nemo_transducer',
       modelingUnit: useHotwords ? 'bpe' : 'cjkchar',
-      bpeVocab: useHotwords ? './bpe.vocab' : '',
+      bpeVocab: useHotwords ? '/models/bpe.vocab' : '',
     },
     decodingMethod: useHotwords ? 'modified_beam_search' : 'greedy_search',
     maxActivePaths: 4,

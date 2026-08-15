@@ -257,7 +257,7 @@ initParakeetBtn.addEventListener('click', async () => {
   initParakeetBtn.disabled = true;
   try {
     await initParakeet();
-    $('parakeetDetail').textContent = 'Les poids ONNX sont servis séparément et montés en lecture seule via WORKERFS ; ils ne sont plus copiés dans le gros MEMFS/.data. L’audio reste local.';
+    $('parakeetDetail').textContent = 'ONNX, tokens et BPE sont servis séparément et montés en lecture seule via WORKERFS ; aucun bundle Emscripten .data n’est chargé. L’audio reste local.';
   } catch (e) {
     $('parakeetDetail').textContent = e.message;
   } finally {

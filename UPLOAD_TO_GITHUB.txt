@@ -1,4 +1,4 @@
-STT v10.4 WORKERFS — ARCHIVE COMPLETE
+STT v10.6 WORKERFS — ARCHIVE COMPLETE
 
 1. Dézipper cette archive.
 2. Remplacer le contenu de ton dépôt par TOUT le contenu extrait.
@@ -9,7 +9,7 @@ STT v10.4 WORKERFS — ARCHIVE COMPLETE
 6. GitHub > Settings > Pages > Source : GitHub Actions.
 7. GitHub > Actions > attendre que "Build STT demo and deploy Pages" soit entièrement vert.
 
-Cette v10.4 force une nouvelle clé de cache : workerfs-v10.4.
+Cette v10.6 force une nouvelle clé de cache : workerfs-v10.6.
 Le workflow exporte FS uniquement et lie WORKERFS avec -lworkerfs.js.
 WORKERFS est utilisé côté navigateur via FS.filesystems.WORKERFS.
 

@@ -14,7 +14,7 @@
     <header>
       <p class="eyebrow">v10 · WORKERFS · sherpa-onnx officiel 1.13.5 · Browser CPU</p>
       <h1>Whisper base.en <span>vs</span> Parakeet v2 INT8</h1>
-      <p class="lede">Même audio micro, mono 16 kHz. Whisper tourne via Transformers.js/WASM. Parakeet utilise sherpa-onnx WebAssembly 1.13.5 avec <code>modified_beam_search</code> + contextual biasing. Les gros fichiers ONNX sont séparés du <code>.data</code> et montés via <code>WORKERFS</code>.</p>
+      <p class="lede">Même audio micro, mono 16 kHz. Whisper tourne via Transformers.js/WASM. Parakeet utilise sherpa-onnx WebAssembly 1.13.5 avec <code>modified_beam_search</code> + contextual biasing. Il n’y a plus de fichier <code>.data</code> Emscripten : ONNX, tokens et BPE sont servis séparément et montés via <code>WORKERFS</code>.</p>
     </header>
 
     <section class="panel architecture">
@@ -54,7 +54,7 @@ MCALLISTER</textarea>
         <span id="parakeetProgressText">Runtime non chargé</span>
       </div>
       <p id="parakeetInitMetrics" class="note">Les timings runtime / montage modèle / recognizer apparaîtront ici.</p>
-      <p id="parakeetDetail" class="note">Le runtime <code>.data</code> reste petit. Encoder/decoder/joiner sont servis comme fichiers ONNX séparés et montés en lecture seule avec WORKERFS. Le cache HTTP peut éviter leur retéléchargement.</p>
+      <p id="parakeetDetail" class="note">Aucun <code>.data</code> Emscripten. Encoder/decoder/joiner, tokens et BPE sont servis séparément puis montés en lecture seule avec WORKERFS. Le cache HTTP peut éviter leur retéléchargement.</p>
     </section>
 
     <section class="grid">
