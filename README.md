@@ -1,4 +1,4 @@
-# Whisper base.en FP32 vs Parakeet-TDT v2 INT8 + Hotwords — v10.2 WORKERFS
+# Whisper base.en FP32 vs Parakeet-TDT v2 INT8 + Hotwords — v10.3 WORKERFS
 
 Démo 100 % navigateur pour comparer le même enregistrement micro entre :
 
@@ -6,7 +6,7 @@ Démo 100 % navigateur pour comparer le même enregistrement micro entre :
 - **NVIDIA Parakeet-TDT 0.6B v2 INT8** via **sherpa-onnx v1.13.5 WebAssembly** ;
 - Parakeet utilise **`modified_beam_search` + contextual biasing** lorsque la liste de hotwords n'est pas vide.
 
-## Ce qui change en v10.1
+## Ce qui change en v10.3
 
 Les gros graphes Parakeet ne sont **plus intégrés dans le `.data` Emscripten**.
 
@@ -119,7 +119,7 @@ Sans hotwords, Parakeet utilise `greedy_search`.
 
 ## Important : ce que cette optimisation améliore et ce qu'elle n'améliore pas
 
-Cette v10.1 vise surtout :
+Cette v10.3 vise surtout :
 
 - moins de copies mémoire avant l'ouverture des modèles ;
 - un `.data` beaucoup plus petit ;
@@ -152,10 +152,10 @@ WORKERFS n’est pas exposé
 force une reconstruction du runtime en changeant la clé :
 
 ```yaml
-key: parakeet-wasm-${{ env.SHERPA_VERSION }}-workerfs-v10.1
+key: parakeet-wasm-${{ env.SHERPA_VERSION }}-workerfs-v10.3
 ```
 
-par exemple en `...-v10.1b`.
+par exemple en `...-v10.3b`.
 
 ### Les modèles externes font 404
 
@@ -188,10 +188,10 @@ Si elle échoue, les poids ont probablement été réintroduits dans `wasm/vad-a
 Voir également `THIRD_PARTY_NOTICES.md`.
 
 
-## v10.2 — correction build WORKERFS
+## v10.3 — correction build WORKERFS
 
-La v10.1 résout WORKERFS via `FS.filesystems.WORKERFS` (chemin canonique du legacy FS Emscripten), force un rebuild du runtime et vérifie pendant GitHub Actions que `WORKERFS` est réellement présent dans le JS généré. Après déploiement, faire un rechargement forcé du site pour éviter un ancien `parakeet-worker.js` en cache.
+La v10.3 résout WORKERFS via `FS.filesystems.WORKERFS` (chemin canonique du legacy FS Emscripten), force un rebuild du runtime et vérifie pendant GitHub Actions que `WORKERFS` est réellement présent dans le JS généré. Après déploiement, faire un rechargement forcé du site pour éviter un ancien `parakeet-worker.js` en cache.
 
 
-### v10.2
-Le workflow n'ajoute plus `WORKERFS` à `EXPORTED_RUNTIME_METHODS`. Il exporte seulement `FS` et lie `-lworkerfs.js`; le backend est récupéré via `FS.filesystems.WORKERFS`. La clé de cache runtime passe à `workerfs-v10.2` pour forcer un rebuild propre.
+### v10.3
+Le workflow n'ajoute plus `WORKERFS` à `EXPORTED_RUNTIME_METHODS`. Il exporte seulement `FS` et lie `-lworkerfs.js`; le backend est récupéré via `FS.filesystems.WORKERFS`. La clé de cache runtime passe à `workerfs-v10.3` pour forcer un rebuild propre.
