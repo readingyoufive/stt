@@ -1,1 +1,2 @@
-v10.6-workerfs-no-data
+v10.7-workerfs-diagnostics
+v10.7-workerfs-no-data

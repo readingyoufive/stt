@@ -1,4 +1,8 @@
-# Whisper base.en FP32 vs Parakeet-TDT v2 INT8 + Hotwords — v10.6 WORKERFS
+# STT browser demo · v10.7 diagnostics
+
+Cette révision garde Parakeet v2 INT8 hors de tout bundle Emscripten `.data` et ajoute un diagnostic visible de bout en bout : progression octet par octet des fichiers, source cache/réseau indicative, montage WORKERFS, stdout/stderr sherpa/ONNX Runtime, heartbeat du Worker et chronomètre indépendant pendant la création synchrone du recognizer.
+
+# Whisper base.en FP32 vs Parakeet-TDT v2 INT8 + Hotwords — v10.7 WORKERFS
 
 Démo 100 % navigateur pour comparer le même enregistrement micro entre :
 
@@ -6,7 +10,7 @@ Démo 100 % navigateur pour comparer le même enregistrement micro entre :
 - **NVIDIA Parakeet-TDT 0.6B v2 INT8** via **sherpa-onnx v1.13.5 WebAssembly** ;
 - Parakeet utilise **`modified_beam_search` + contextual biasing** lorsque la liste de hotwords n'est pas vide.
 
-## Ce qui change en v10.6
+## Ce qui change en v10.7
 
 Les gros graphes Parakeet ne sont **plus intégrés dans le `.data` Emscripten**.
 
@@ -152,7 +156,7 @@ WORKERFS n’est pas exposé
 force une reconstruction du runtime en changeant la clé :
 
 ```yaml
-key: parakeet-wasm-${{ env.SHERPA_VERSION }}-workerfs-v10.6
+key: parakeet-wasm-${{ env.SHERPA_VERSION }}-workerfs-v10.7
 ```
 
 par exemple en `...-v10.3b`.
@@ -194,4 +198,4 @@ La v10.3 résout WORKERFS via `FS.filesystems.WORKERFS` (chemin canonique du leg
 
 
 ### v10.3
-Le workflow n'ajoute plus `WORKERFS` à `EXPORTED_RUNTIME_METHODS`. Il exporte seulement `FS` et lie `-lworkerfs.js`; le backend est récupéré via `FS.filesystems.WORKERFS`. La clé de cache runtime passe à `workerfs-v10.6` pour forcer un rebuild propre.
+Le workflow n'ajoute plus `WORKERFS` à `EXPORTED_RUNTIME_METHODS`. Il exporte seulement `FS` et lie `-lworkerfs.js`; le backend est récupéré via `FS.filesystems.WORKERFS`. La clé de cache runtime passe à `workerfs-v10.7` pour forcer un rebuild propre.

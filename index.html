@@ -12,7 +12,7 @@
 <body>
   <main class="shell">
     <header>
-      <p class="eyebrow">v10 · WORKERFS · sherpa-onnx officiel 1.13.5 · Browser CPU</p>
+      <p class="eyebrow">v10.7 · WORKERFS · diagnostics · sherpa-onnx officiel 1.13.5 · Browser CPU</p>
       <h1>Whisper base.en <span>vs</span> Parakeet v2 INT8</h1>
       <p class="lede">Même audio micro, mono 16 kHz. Whisper tourne via Transformers.js/WASM. Parakeet utilise sherpa-onnx WebAssembly 1.13.5 avec <code>modified_beam_search</code> + contextual biasing. Il n’y a plus de fichier <code>.data</code> Emscripten : ONNX, tokens et BPE sont servis séparément et montés via <code>WORKERFS</code>.</p>
     </header>
@@ -54,7 +54,23 @@ MCALLISTER</textarea>
         <span id="parakeetProgressText">Runtime non chargé</span>
       </div>
       <p id="parakeetInitMetrics" class="note">Les timings runtime / montage modèle / recognizer apparaîtront ici.</p>
-      <p id="parakeetDetail" class="note">Aucun <code>.data</code> Emscripten. Encoder/decoder/joiner, tokens et BPE sont servis séparément puis montés en lecture seule avec WORKERFS. Le cache HTTP peut éviter leur retéléchargement.</p>
+      <p id="parakeetDetail" class="note">Aucun <code>.data</code> Emscripten. Encoder/decoder/joiner, tokens et BPE sont servis séparément puis montés en lecture seule avec WORKERFS. Le cache HTTP peut éviter leur retéléchargement. La zone de diagnostic ci-dessous montre chaque phase et les octets réellement lus.</p>
+      <section class="diagnostic-box" aria-label="Diagnostic Parakeet">
+        <div class="diagnostic-head">
+          <div><strong id="parakeetPhase">Phase : inactif</strong><span id="parakeetPhaseDetail">—</span></div>
+          <div class="diagnostic-clock"><strong id="parakeetPhaseElapsed">0.0 s</strong><span id="parakeetHeartbeat">Worker : —</span></div>
+        </div>
+        <div id="parakeetFiles" class="file-diagnostics"></div>
+        <div class="diagnostic-actions">
+          <strong>Journal sherpa / ONNX Runtime</strong>
+          <div class="diagnostic-buttons">
+            <button id="copyParakeetLogBtn" type="button">Copier le journal</button>
+            <button id="resetParakeetWorkerBtn" type="button">Réinitialiser Worker</button>
+            <button id="clearParakeetLogBtn" type="button">Effacer</button>
+          </div>
+        </div>
+        <pre id="parakeetDebugLog" class="debug-log">v10.7 · aucun diagnostic reçu pour le moment.</pre>
+      </section>
     </section>
 
     <section class="grid">

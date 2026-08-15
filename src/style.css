@@ -58,3 +58,19 @@ code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
  textarea { background:#101827; border-color:#354258; }
  .status.busy { background:#5b4817; }.status.ready{background:#174c32}.status.error{background:#5a2525}
 }
+.diagnostic-box { border:1px solid #d8deea; border-radius:14px; padding:14px; display:grid; gap:12px; background:#fbfcff; }
+.diagnostic-head { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; }
+.diagnostic-head strong,.diagnostic-head span { display:block; }
+.diagnostic-head span { margin-top:3px; font-size:12px; opacity:.65; }
+.diagnostic-clock { text-align:right; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.file-diagnostics { display:grid; gap:7px; }
+.file-diag-row { display:grid; grid-template-columns:minmax(110px,.8fr) minmax(160px,2fr) auto; gap:9px; align-items:center; font-size:12px; }
+.file-diag-row progress { height:9px; }
+.file-diag-row .file-state { font-variant-numeric:tabular-nums; text-align:right; white-space:nowrap; opacity:.76; }
+.diagnostic-actions { display:flex; justify-content:space-between; align-items:center; gap:10px; font-size:12px; }
+.diagnostic-actions button { padding:6px 9px; font-size:11px; }
+.debug-log { margin:0; max-height:300px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; background:#0d1420; color:#dce7f6; border-radius:10px; padding:11px; font:11px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; }
+@media (max-width:620px) { .diagnostic-head{display:grid}.diagnostic-clock{text-align:left}.file-diag-row{grid-template-columns:1fr}.file-diag-row .file-state{text-align:left} }
+@media (prefers-color-scheme:dark) { .diagnostic-box { background:#101827; border-color:#354258; } }
+
+.diagnostic-buttons { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; }

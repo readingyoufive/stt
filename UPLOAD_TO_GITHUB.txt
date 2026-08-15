@@ -1,19 +1,14 @@
-STT v10.6 WORKERFS — ARCHIVE COMPLETE
+STT v10.7 WORKERFS + DIAGNOSTICS — ARCHIVE COMPLETE
 
-1. Dézipper cette archive.
-2. Remplacer le contenu de ton dépôt par TOUT le contenu extrait.
-3. IMPORTANT : vérifier que ce fichier existe sur GitHub :
-   .github/workflows/pages.yml
-4. Il ne doit PAS y avoir de pages.yml à la racine du dépôt.
-5. Commit/push sur main.
-6. GitHub > Settings > Pages > Source : GitHub Actions.
-7. GitHub > Actions > attendre que "Build STT demo and deploy Pages" soit entièrement vert.
+1. Décompresser l'archive.
+2. Remplacer le contenu du dépôt GitHub par TOUT le contenu décompressé, y compris le dossier caché .github.
+3. Vérifier que le seul workflow est .github/workflows/pages.yml.
+4. Commit sur main.
+5. Dans Actions, le log doit afficher :
+   WORKFLOW_REVISION=v10.7-workerfs-diagnostics
+6. Attendre que build ET deploy soient verts.
+7. Recharger la page. L'en-tête doit afficher v10.7 et le journal doit recevoir :
+   Worker v10.7-workerfs-diagnostics
 
-Cette v10.6 force une nouvelle clé de cache : workerfs-v10.6.
-Le workflow exporte FS uniquement et lie WORKERFS avec -lworkerfs.js.
-WORKERFS est utilisé côté navigateur via FS.filesystems.WORKERFS.
-
-Le build refuse de déployer si :
-- WORKERFS n'est pas présent dans le runtime généré ;
-- le .data dépasse 50 MB ;
-- les poids ONNX ont été ré-embarqués accidentellement dans le .data.
+La clé runtime est workerfs-v10.7, donc le runtime sherpa est recompilé une fois.
+Aucun fichier Emscripten .data n'est généré ou publié.
