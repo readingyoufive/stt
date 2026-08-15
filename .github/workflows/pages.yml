@@ -34,12 +34,37 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Restore prebuilt Parakeet WASM cache
+      - name: Restore Parakeet model cache
+        id: model-cache
+        uses: actions/cache@v4
+        with:
+          path: .cache/parakeet-model
+          key: parakeet-v2-int8-model-v1
+
+      - name: Download Parakeet INT8 model files
+        if: steps.model-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p .cache/parakeet-model .model-download
+          curl -L --fail --retry 5 --retry-delay 3 \
+            -o .model-download/parakeet.tar.bz2 "$PARAKEET_MODEL_URL"
+          tar -xjf .model-download/parakeet.tar.bz2 -C .model-download
+          MODEL_DIR=".model-download/$PARAKEET_MODEL"
+          test -s "$MODEL_DIR/encoder.int8.onnx"
+          cp "$MODEL_DIR/encoder.int8.onnx" .cache/parakeet-model/
+          cp "$MODEL_DIR/decoder.int8.onnx" .cache/parakeet-model/
+          cp "$MODEL_DIR/joiner.int8.onnx" .cache/parakeet-model/
+          cp "$MODEL_DIR/tokens.txt" .cache/parakeet-model/
+          rm -rf .model-download
+          ls -lh .cache/parakeet-model
+
+      - name: Restore prebuilt sherpa WORKERFS runtime cache
         id: runtime-cache
         uses: actions/cache@v4
         with:
           path: .cache/parakeet-runtime
-          key: parakeet-wasm-${{ env.SHERPA_VERSION }}-tdt-v2-int8-hotwords-v1
+          key: parakeet-wasm-${{ env.SHERPA_VERSION }}-workerfs-v10.1
 
       - name: Restore BPE vocab cache
         if: steps.runtime-cache.outputs.cache-hit != 'true'
@@ -57,7 +82,7 @@ jobs:
             build-essential cmake git curl ca-certificates bzip2 \
             python3 python3-venv python3-pip
 
-      - name: Download sherpa-onnx and Parakeet INT8
+      - name: Download sherpa-onnx source
         if: steps.runtime-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
@@ -67,26 +92,15 @@ jobs:
           git clone --depth 1 --branch "$SHERPA_VERSION" \
             https://github.com/k2-fsa/sherpa-onnx.git .sherpa-build/sherpa-onnx
 
-          curl -L --fail --retry 5 --retry-delay 3 \
-            -o .sherpa-build/parakeet.tar.bz2 "$PARAKEET_MODEL_URL"
-          tar -xjf .sherpa-build/parakeet.tar.bz2 -C .sherpa-build
-          test -d ".sherpa-build/$PARAKEET_MODEL"
-
       - name: Prepare exact BPE vocab for hotwords
         if: steps.runtime-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euxo pipefail
           mkdir -p .cache/parakeet-bpe
-          MODEL_DIR=".sherpa-build/$PARAKEET_MODEL"
-
-          # If a future official model package ships bpe.vocab, prefer it.
-          if [ -f "$MODEL_DIR/bpe.vocab" ]; then
-            cp "$MODEL_DIR/bpe.vocab" .cache/parakeet-bpe/bpe.vocab
-          fi
 
           if [ ! -s .cache/parakeet-bpe/bpe.vocab ]; then
-            echo "bpe.vocab is not in the INT8 package; extracting exact SentencePiece scores from NVIDIA .nemo"
+            echo "Generating exact bpe.vocab from NVIDIA SentencePiece tokenizer"
             curl -L --fail --retry 5 --retry-delay 3 \
               -o .sherpa-build/parakeet-v2.nemo "$PARAKEET_NEMO_URL"
             python3 -m venv .sherpa-build/bpe-venv
@@ -99,28 +113,53 @@ jobs:
           test -s .cache/parakeet-bpe/bpe.vocab
           head -n 3 .cache/parakeet-bpe/bpe.vocab
 
-      - name: Populate sherpa WASM assets
+      - name: Prepare SMALL sherpa WASM assets
         if: steps.runtime-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euxo pipefail
           SHERPA=.sherpa-build/sherpa-onnx
-          MODEL_DIR=".sherpa-build/$PARAKEET_MODEL"
           ASSETS="$SHERPA/wasm/vad-asr/assets"
           mkdir -p "$ASSETS"
           find "$ASSETS" -maxdepth 1 -type f ! -name README.md -delete
 
-          cp "$MODEL_DIR/encoder.int8.onnx" "$ASSETS/encoder.int8.onnx"
-          cp "$MODEL_DIR/decoder.int8.onnx" "$ASSETS/decoder.int8.onnx"
-          cp "$MODEL_DIR/joiner.int8.onnx" "$ASSETS/joiner.int8.onnx"
-          cp "$MODEL_DIR/tokens.txt" "$ASSETS/tokens.txt"
+          # Only small assets remain in Emscripten .data.
+          # The ~630 MB ONNX graphs are served separately and mounted through WORKERFS.
+          cp .cache/parakeet-model/tokens.txt "$ASSETS/tokens.txt"
           cp .cache/parakeet-bpe/bpe.vocab "$ASSETS/bpe.vocab"
-
           curl -L --fail --retry 5 --retry-delay 3 \
             -o "$ASSETS/silero_vad.onnx" \
             https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx
 
           ls -lh "$ASSETS"
+
+      - name: Patch sherpa WASM target for WORKERFS
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('.sherpa-build/sherpa-onnx/wasm/vad-asr/CMakeLists.txt')
+          s = p.read_text()
+
+          old = "'HEAPU8','HEAP16','HEAP32','HEAPU32','HEAPF32','HEAPF64']"
+          new = "'HEAPU8','HEAP16','HEAP32','HEAPU32','HEAPF32','HEAPF64','FS','WORKERFS']"
+          if old not in s:
+              raise SystemExit('Could not find EXPORTED_RUNTIME_METHODS list to patch')
+          s = s.replace(old, new, 1)
+
+          marker = 'set(CMAKE_EXECUTABLE_LINKER_FLAGS "${CMAKE_EXECUTABLE_LINKER_FLAGS} ${MY_FLAGS}")'
+          replacement = marker + '\nstring(APPEND CMAKE_EXECUTABLE_LINKER_FLAGS " -lworkerfs.js -sENVIRONMENT=worker ")'
+          if marker not in s:
+              raise SystemExit('Could not find linker flags marker to patch')
+          s = s.replace(marker, replacement, 1)
+
+          p.write_text(s)
+          PY
+
+          grep -n "WORKERFS\|workerfs" .sherpa-build/sherpa-onnx/wasm/vad-asr/CMakeLists.txt
 
       - name: Install Emscripten 4.0.23
         if: steps.runtime-cache.outputs.cache-hit != 'true'
@@ -131,7 +170,7 @@ jobs:
           .sherpa-build/emsdk/emsdk install "$EMSDK_VERSION"
           .sherpa-build/emsdk/emsdk activate "$EMSDK_VERSION"
 
-      - name: Build official sherpa-onnx 1.13.5 WASM bundle
+      - name: Build sherpa-onnx 1.13.5 WASM + WORKERFS
         if: steps.runtime-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
@@ -146,6 +185,18 @@ jobs:
           test -s "$OUT/sherpa-onnx-wasm-main-vad-asr.wasm"
           test -s "$OUT/sherpa-onnx-wasm-main-vad-asr.data"
 
+          # Fail the build immediately if libworkerfs.js was not linked into the generated runtime.
+          if ! grep -q "WORKERFS" "$OUT/sherpa-onnx-wasm-main-vad-asr.js"; then
+            echo "ERROR: generated sherpa runtime does not contain WORKERFS" >&2
+            exit 1
+          fi
+          echo "WORKERFS found in generated runtime"
+
+          # The .data bundle must stay small: no Parakeet ONNX weights inside it.
+          DATA_BYTES=$(stat -c%s "$OUT/sherpa-onnx-wasm-main-vad-asr.data")
+          echo "runtime .data size: $DATA_BYTES bytes"
+          test "$DATA_BYTES" -lt 50000000
+
           mkdir -p ../../.cache/parakeet-runtime
           cp "$OUT/sherpa-onnx-asr.js" ../../.cache/parakeet-runtime/
           cp "$OUT/sherpa-onnx-wasm-main-vad-asr.js" ../../.cache/parakeet-runtime/
@@ -154,28 +205,22 @@ jobs:
           printf '%s\n' \
             "sherpa-onnx=$SHERPA_VERSION" \
             "model=$PARAKEET_MODEL" \
+            "storage=external ONNX + WORKERFS" \
             "decoding=modified_beam_search" \
             "hotwords=bpe.vocab + hotwords_file" \
             > ../../.cache/parakeet-runtime/VERSION.txt
 
-      - name: Install generated runtime into site
+      - name: Install runtime and external model into site
         shell: bash
         run: |
           set -euxo pipefail
-          test -s .cache/parakeet-runtime/sherpa-onnx-wasm-main-vad-asr.data
-          rm -rf public/parakeet-sherpa
-          mkdir -p public/parakeet-sherpa
+          rm -rf public/parakeet-sherpa public/parakeet-model
+          mkdir -p public/parakeet-sherpa public/parakeet-model
           cp -a .cache/parakeet-runtime/. public/parakeet-sherpa/
-          ls -lh public/parakeet-sherpa
-
-      - name: Upload downloadable Parakeet WASM runtime
-        uses: actions/upload-artifact@v4
-        with:
-          name: sherpa-parakeet-runtime
-          path: .cache/parakeet-runtime/
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 30
+          cp .cache/parakeet-model/encoder.int8.onnx public/parakeet-model/
+          cp .cache/parakeet-model/decoder.int8.onnx public/parakeet-model/
+          cp .cache/parakeet-model/joiner.int8.onnx public/parakeet-model/
+          ls -lh public/parakeet-sherpa public/parakeet-model
 
       - name: Install frontend dependencies
         run: npm install --no-audit --no-fund
@@ -199,7 +244,20 @@ jobs:
           test -s dist/parakeet-sherpa/sherpa-onnx-wasm-main-vad-asr.js
           test -s dist/parakeet-sherpa/sherpa-onnx-wasm-main-vad-asr.wasm
           test -s dist/parakeet-sherpa/sherpa-onnx-wasm-main-vad-asr.data
+          test -s dist/parakeet-model/encoder.int8.onnx
+          test -s dist/parakeet-model/decoder.int8.onnx
+          test -s dist/parakeet-model/joiner.int8.onnx
+          DATA_BYTES=$(stat -c%s dist/parakeet-sherpa/sherpa-onnx-wasm-main-vad-asr.data)
+          echo "published runtime .data: $DATA_BYTES bytes"
+          test "$DATA_BYTES" -lt 50000000
           du -sh dist
+
+      - name: Upload sherpa WORKERFS runtime artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sherpa-parakeet-workerfs-runtime
+          path: public/parakeet-sherpa
+          retention-days: 30
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
