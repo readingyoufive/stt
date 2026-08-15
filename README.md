@@ -1,4 +1,4 @@
-# Whisper base.en FP32 vs Parakeet-TDT v2 INT8 + Hotwords — v10.1 WORKERFS
+# Whisper base.en FP32 vs Parakeet-TDT v2 INT8 + Hotwords — v10.2 WORKERFS
 
 Démo 100 % navigateur pour comparer le même enregistrement micro entre :
 
@@ -188,6 +188,10 @@ Si elle échoue, les poids ont probablement été réintroduits dans `wasm/vad-a
 Voir également `THIRD_PARTY_NOTICES.md`.
 
 
-## v10.1 — correction WORKERFS
+## v10.2 — correction build WORKERFS
 
 La v10.1 résout WORKERFS via `FS.filesystems.WORKERFS` (chemin canonique du legacy FS Emscripten), force un rebuild du runtime et vérifie pendant GitHub Actions que `WORKERFS` est réellement présent dans le JS généré. Après déploiement, faire un rechargement forcé du site pour éviter un ancien `parakeet-worker.js` en cache.
+
+
+### v10.2
+Le workflow n'ajoute plus `WORKERFS` à `EXPORTED_RUNTIME_METHODS`. Il exporte seulement `FS` et lie `-lworkerfs.js`; le backend est récupéré via `FS.filesystems.WORKERFS`. La clé de cache runtime passe à `workerfs-v10.2` pour forcer un rebuild propre.
