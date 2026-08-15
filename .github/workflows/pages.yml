@@ -17,6 +17,7 @@ concurrency:
 env:
   SHERPA_VERSION: v1.13.5
   EMSDK_VERSION: 4.0.23
+  WORKFLOW_REVISION: v10.6-workerfs-no-data
   PARAKEET_MODEL: sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8
   PARAKEET_MODEL_URL: https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2
   PARAKEET_NEMO_URL: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2/resolve/main/parakeet-tdt-0.6b-v2.nemo?download=true
@@ -28,6 +29,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Show workflow revision
+        run: |
+          echo "WORKFLOW_REVISION=$WORKFLOW_REVISION"
+          echo "Expected: v10.6-workerfs-no-data"
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -64,10 +70,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache/parakeet-runtime
-          key: parakeet-wasm-${{ env.SHERPA_VERSION }}-workerfs-v10.4
+          key: parakeet-wasm-${{ env.SHERPA_VERSION }}-workerfs-v10.6
 
       - name: Restore BPE vocab cache
-        if: steps.runtime-cache.outputs.cache-hit != 'true'
         id: bpe-cache
         uses: actions/cache@v4
         with:
@@ -123,8 +128,9 @@ jobs:
           mkdir -p "$ASSETS"
           find "$ASSETS" -mindepth 1 ! -name README.md -exec rm -rf {} +
 
-          # Only small assets remain in Emscripten .data.
-          # The ~630 MB ONNX graphs are served separately and mounted through WORKERFS.
+          # These files satisfy sherpa's configure-time checks only.
+          # v10.6 removes --preload-file, so no Emscripten .data is generated.
+          # At runtime these support files are served separately and mounted via WORKERFS.
           cp .cache/parakeet-model/tokens.txt "$ASSETS/tokens.txt"
           cp .cache/parakeet-bpe/bpe.vocab "$ASSETS/bpe.vocab"
           curl -L --fail --retry 5 --retry-delay 3 \
@@ -133,75 +139,74 @@ jobs:
 
           ls -lh "$ASSETS"
 
-      - name: Patch sherpa WASM target for WORKERFS
+      - name: Patch sherpa WASM target for WORKERFS without .data
         if: steps.runtime-cache.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euxo pipefail
+          echo "WORKFLOW_REVISION=$WORKFLOW_REVISION"
           python3 - <<'PY'
           from pathlib import Path
-          import re
 
           p = Path('.sherpa-build/sherpa-onnx/wasm/vad-asr/CMakeLists.txt')
           s = p.read_text()
 
-          # Always replace the WHOLE runtime-methods line.  Do not try to
-          # incrementally edit an older patched value: that is what left
-          # WORKERFS in EXPORTED_RUNTIME_METHODS in v10.1/v10.2 deployments.
-          runtime_line = (
-              'string(APPEND MY_FLAGS " -sEXPORTED_RUNTIME_METHODS=['
-              "'ccall','stringToUTF8','setValue','getValue','lengthBytesUTF8',"
-              "'UTF8ToString','HEAPU8','HEAP16','HEAP32','HEAPU32','HEAPF32','HEAPF64','FS'] \")"
+          # Export FS only. WORKERFS is linked as a JS filesystem backend.
+          old = "'HEAPU8','HEAP16','HEAP32','HEAPU32','HEAPF32','HEAPF64']"
+          new = "'HEAPU8','HEAP16','HEAP32','HEAPU32','HEAPF32','HEAPF64','FS']"
+          if old not in s:
+              raise SystemExit('Could not find official EXPORTED_RUNTIME_METHODS tail')
+          s = s.replace(old, new, 1)
+
+          # No preload package at all: tokenizer/support files will also be
+          # fetched as Blobs and mounted through WORKERFS at runtime.
+          preload = 'string(APPEND MY_FLAGS "--preload-file ${CMAKE_CURRENT_SOURCE_DIR}/assets@. ")\n'
+          if preload not in s:
+              raise SystemExit('Could not find official --preload-file line')
+          s = s.replace(preload, '', 1)
+
+          # Link WORKERFS on the executable only.
+          marker = 'target_link_libraries(sherpa-onnx-wasm-main-vad-asr sherpa-onnx-c-api)'
+          addition = marker + '\n' + (
+              'target_link_options(sherpa-onnx-wasm-main-vad-asr PRIVATE '
+              '"-lworkerfs.js" "-sENVIRONMENT=worker")'
           )
-          pattern = r'(?m)^string\(APPEND MY_FLAGS " -sEXPORTED_RUNTIME_METHODS=.*$'
-          s, n = re.subn(pattern, runtime_line, s, count=1)
-          if n != 1:
-              raise SystemExit(f'Expected exactly one EXPORTED_RUNTIME_METHODS line, replaced {n}')
-
-          # These are linker-only flags.  Removing them from compile flags
-          # avoids the noisy "linker setting ignored during compilation" warnings.
-          s = re.sub(r'(?m)^set\(CMAKE_C_FLAGS "\$\{CMAKE_C_FLAGS\} \$\{MY_FLAGS\}"\)\n?', '', s)
-          s = re.sub(r'(?m)^set\(CMAKE_CXX_FLAGS "\$\{CMAKE_CXX_FLAGS\} \$\{MY_FLAGS\}"\)\n?', '', s)
-
-          marker = 'set(CMAKE_EXECUTABLE_LINKER_FLAGS "${CMAKE_EXECUTABLE_LINKER_FLAGS} ${MY_FLAGS}")'
           if marker not in s:
-              raise SystemExit('Could not find CMAKE_EXECUTABLE_LINKER_FLAGS marker')
+              raise SystemExit('Could not find target_link_libraries marker')
+          s = s.replace(marker, addition, 1)
 
-          # Remove any previous custom workerfs linker line, then add one cleanly.
-          s = re.sub(r'(?m)^string\(APPEND CMAKE_EXECUTABLE_LINKER_FLAGS ".*workerfs\.js.*"\)\n?', '', s)
-          s = s.replace(
-              marker,
-              marker + '\nstring(APPEND CMAKE_EXECUTABLE_LINKER_FLAGS " -lworkerfs.js -sENVIRONMENT=worker ")',
-              1,
-          )
+          # sherpa's upstream install list assumes --preload-file generated a
+          # .data file. Since v10.6 intentionally has no .data, remove only
+          # that install entry.
+          data_install = '    "$<TARGET_FILE_DIR:sherpa-onnx-wasm-main-vad-asr>/sherpa-onnx-wasm-main-vad-asr.data"\n'
+          if data_install not in s:
+              raise SystemExit('Could not find upstream .data install entry')
+          s = s.replace(data_install, '', 1)
 
           p.write_text(s)
 
-          # Hard assertions BEFORE invoking em++.
-          runtime_lines = [line for line in s.splitlines() if 'EXPORTED_RUNTIME_METHODS' in line]
+          runtime_lines = [x for x in s.splitlines() if 'EXPORTED_RUNTIME_METHODS' in x]
           if len(runtime_lines) != 1:
-              raise SystemExit(f'Unexpected EXPORTED_RUNTIME_METHODS lines: {runtime_lines}')
+              raise SystemExit(f'Unexpected runtime export lines: {runtime_lines}')
           line = runtime_lines[0]
           print('FINAL EXPORTED_RUNTIME_METHODS:', line)
           if 'WORKERFS' in line:
-              raise SystemExit('BUG: WORKERFS is still present in EXPORTED_RUNTIME_METHODS')
+              raise SystemExit('BUG: WORKERFS must not be in EXPORTED_RUNTIME_METHODS')
           if "'FS'" not in line:
-              raise SystemExit('BUG: FS is missing from EXPORTED_RUNTIME_METHODS')
-          if '-lworkerfs.js' not in s:
-              raise SystemExit('BUG: -lworkerfs.js is missing from linker flags')
+              raise SystemExit('BUG: FS missing from EXPORTED_RUNTIME_METHODS')
+          if '--preload-file' in s:
+              raise SystemExit('BUG: --preload-file still present; .data would be generated')
+          if 'sherpa-onnx-wasm-main-vad-asr.data' in s:
+              raise SystemExit('BUG: .data is still referenced by CMake install')
+          if 'target_link_options(sherpa-onnx-wasm-main-vad-asr PRIVATE "-lworkerfs.js"' not in s:
+              raise SystemExit('BUG: target-specific -lworkerfs.js is missing')
           PY
 
-          echo '--- Patched CMake lines ---'
-          grep -n "EXPORTED_RUNTIME_METHODS\|workerfs.js\|CMAKE_EXECUTABLE_LINKER_FLAGS" \
-            .sherpa-build/sherpa-onnx/wasm/vad-asr/CMakeLists.txt
-
-          # Belt-and-suspenders shell assertion: WORKERFS must NOT be exported
-          # as an Emscripten runtime method.
-          if grep "EXPORTED_RUNTIME_METHODS" \
-              .sherpa-build/sherpa-onnx/wasm/vad-asr/CMakeLists.txt | grep -q "WORKERFS"; then
-            echo "ERROR: WORKERFS still appears in EXPORTED_RUNTIME_METHODS" >&2
-            exit 1
-          fi
+          echo '--- WORKFLOW REVISION ---'
+          echo "$WORKFLOW_REVISION"
+          echo '--- Patched CMake ---'
+          grep -n "EXPORTED_RUNTIME_METHODS\|target_link_options\|target_link_libraries\|preload-file\|\.data" \
+            .sherpa-build/sherpa-onnx/wasm/vad-asr/CMakeLists.txt || true
 
       - name: Install Emscripten 4.0.23
         if: steps.runtime-cache.outputs.cache-hit != 'true'
@@ -225,7 +230,7 @@ jobs:
           test -s "$OUT/sherpa-onnx-asr.js"
           test -s "$OUT/sherpa-onnx-wasm-main-vad-asr.js"
           test -s "$OUT/sherpa-onnx-wasm-main-vad-asr.wasm"
-          test -s "$OUT/sherpa-onnx-wasm-main-vad-asr.data"
+          test ! -e "$OUT/sherpa-onnx-wasm-main-vad-asr.data"
 
           # Fail the build immediately if libworkerfs.js was not linked into the generated runtime.
           if ! grep -q "WORKERFS" "$OUT/sherpa-onnx-wasm-main-vad-asr.js"; then
@@ -234,20 +239,20 @@ jobs:
           fi
           echo "WORKERFS found in generated runtime"
 
-          # The .data bundle must stay small: no Parakeet ONNX weights inside it.
-          DATA_BYTES=$(stat -c%s "$OUT/sherpa-onnx-wasm-main-vad-asr.data")
-          echo "runtime .data size: $DATA_BYTES bytes"
-          test "$DATA_BYTES" -lt 50000000
+          # v10.6 deliberately has no Emscripten .data package at all.
+          echo "OK: no Emscripten .data package generated"
 
           mkdir -p ../../.cache/parakeet-runtime
           cp "$OUT/sherpa-onnx-asr.js" ../../.cache/parakeet-runtime/
           cp "$OUT/sherpa-onnx-wasm-main-vad-asr.js" ../../.cache/parakeet-runtime/
           cp "$OUT/sherpa-onnx-wasm-main-vad-asr.wasm" ../../.cache/parakeet-runtime/
-          cp "$OUT/sherpa-onnx-wasm-main-vad-asr.data" ../../.cache/parakeet-runtime/
+          cp wasm/vad-asr/assets/silero_vad.onnx ../../.cache/parakeet-runtime/
+          cp wasm/vad-asr/assets/tokens.txt ../../.cache/parakeet-runtime/
+          cp ../../.cache/parakeet-bpe/bpe.vocab ../../.cache/parakeet-runtime/
           printf '%s\n' \
             "sherpa-onnx=$SHERPA_VERSION" \
             "model=$PARAKEET_MODEL" \
-            "storage=external ONNX + WORKERFS" \
+            "storage=no .data; ONNX + tokenizer assets via WORKERFS" \
             "decoding=modified_beam_search" \
             "hotwords=bpe.vocab + hotwords_file" \
             > ../../.cache/parakeet-runtime/VERSION.txt
@@ -285,13 +290,14 @@ jobs:
           test -s dist/parakeet-sherpa/sherpa-onnx-asr.js
           test -s dist/parakeet-sherpa/sherpa-onnx-wasm-main-vad-asr.js
           test -s dist/parakeet-sherpa/sherpa-onnx-wasm-main-vad-asr.wasm
-          test -s dist/parakeet-sherpa/sherpa-onnx-wasm-main-vad-asr.data
+          test ! -e dist/parakeet-sherpa/sherpa-onnx-wasm-main-vad-asr.data
+          test -s dist/parakeet-sherpa/tokens.txt
+          test -s dist/parakeet-sherpa/bpe.vocab
+          test -s dist/parakeet-sherpa/silero_vad.onnx
           test -s dist/parakeet-model/encoder.int8.onnx
           test -s dist/parakeet-model/decoder.int8.onnx
           test -s dist/parakeet-model/joiner.int8.onnx
-          DATA_BYTES=$(stat -c%s dist/parakeet-sherpa/sherpa-onnx-wasm-main-vad-asr.data)
-          echo "published runtime .data: $DATA_BYTES bytes"
-          test "$DATA_BYTES" -lt 50000000
+          echo "OK: published site has no Emscripten .data package"
           du -sh dist
 
       - name: Upload sherpa WORKERFS runtime artifact
