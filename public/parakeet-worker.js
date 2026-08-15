@@ -1,17 +1,54 @@
 /*
  * Parakeet-TDT 0.6B v2 INT8 + contextual biasing.
- * Classic Worker because the official sherpa-onnx Emscripten bundle exposes globals.
+ * v10: the large ONNX files are NOT preloaded into Emscripten MEMFS.
+ * They are fetched as browser Blobs and mounted read-only through WORKERFS.
  */
 
 const APP_BASE = new URL('./', self.location.href);
 const RUNTIME_BASE = new URL('parakeet-sherpa/', APP_BASE);
+const MODEL_BASE = new URL('parakeet-model/', APP_BASE);
+
+const MODEL_FILES = [
+  { name: 'encoder.int8.onnx', label: 'encoder INT8' },
+  { name: 'decoder.int8.onnx', label: 'decoder INT8' },
+  { name: 'joiner.int8.onnx', label: 'joiner INT8' },
+];
+
 let runtimeReady = false;
 let runtimeFailed = null;
+let runtimeReadyAt = 0;
+let modelMounted = false;
+let modelMountPromise = null;
+let modelBlobs = [];
+let modelMountMetrics = null;
 let recognizer = null;
 let recognizerFingerprint = '';
 
-function postStatus(text, status = 'busy') {
-  self.postMessage({ type: 'status', text, status });
+function postStatus(text, status = 'busy', extra = {}) {
+  self.postMessage({ type: 'status', text, status, ...extra });
+}
+
+function formatMb(bytes) {
+  return `${(bytes / 1024 / 1024).toFixed(bytes >= 100 * 1024 * 1024 ? 0 : 1)} MB`;
+}
+
+function resolveFs() {
+  const fs = Module?.FS || self.FS || (typeof FS !== 'undefined' ? FS : null);
+  if (!fs?.mount || !fs?.writeFile) {
+    throw new Error('Emscripten FS n’est pas exposé par le runtime sherpa-onnx.');
+  }
+  return fs;
+}
+
+function resolveWorkerFs() {
+  const workerFs = Module?.WORKERFS || self.WORKERFS || (typeof WORKERFS !== 'undefined' ? WORKERFS : null);
+  if (!workerFs) {
+    throw new Error(
+      'WORKERFS n’est pas exposé. Le runtime doit être compilé avec -lworkerfs.js et ' +
+      "EXPORTED_RUNTIME_METHODS contenant 'FS' et 'WORKERFS'."
+    );
+  }
+  return workerFs;
 }
 
 // Emscripten reads Module before the generated runtime script is evaluated.
@@ -20,13 +57,16 @@ var Module = {
     return new URL(path.split('/').pop(), RUNTIME_BASE).href;
   },
   setStatus(text) {
-    if (text) postStatus(text, 'busy');
+    if (text) postStatus(text, 'busy', { phase: 'runtime' });
   },
   monitorRunDependencies(left) {
-    if (left > 0) postStatus(`préparation du runtime (${left} dépendance${left > 1 ? 's' : ''})…`, 'busy');
+    if (left > 0) {
+      postStatus(`préparation du petit runtime (${left} dépendance${left > 1 ? 's' : ''})…`, 'busy', { phase: 'runtime' });
+    }
   },
   onRuntimeInitialized() {
     runtimeReady = true;
+    runtimeReadyAt = performance.now();
     self.postMessage({ type: 'runtime-ready' });
   },
   onAbort(reason) {
@@ -36,7 +76,7 @@ var Module = {
 };
 
 try {
-  postStatus('chargement sherpa-onnx 1.13.5 + Parakeet INT8 (~660 MB)…', 'busy');
+  postStatus('chargement du runtime sherpa-onnx (modèle externe)…', 'busy', { phase: 'runtime' });
   importScripts(new URL('parakeet-sherpa/sherpa-onnx-asr.js', APP_BASE).href);
   importScripts(new URL('parakeet-sherpa/sherpa-onnx-wasm-main-vad-asr.js', APP_BASE).href);
 } catch (error) {
@@ -60,8 +100,84 @@ function waitForRuntime(timeoutMs = 300000) {
         clearInterval(timer);
         reject(new Error('Timeout pendant le chargement du runtime Parakeet.'));
       }
-    }, 150);
+    }, 100);
   });
+}
+
+async function fetchModelBlob(file) {
+  const url = new URL(file.name, MODEL_BASE).href;
+  const t0 = performance.now();
+  postStatus(`ouverture ${file.label}…`, 'busy', { phase: 'model', file: file.name });
+
+  // force-cache asks the browser to reuse its HTTP cache when possible.
+  // response.blob() gives WORKERFS a Blob without copying it into the WASM heap/MEMFS.
+  const response = await fetch(url, { cache: 'force-cache' });
+  if (!response.ok) {
+    throw new Error(`${file.name}: HTTP ${response.status} ${response.statusText}`);
+  }
+
+  const blob = await response.blob();
+  if (!blob.size) throw new Error(`${file.name}: fichier vide`);
+  const elapsedMs = performance.now() - t0;
+  postStatus(`${file.label} disponible · ${formatMb(blob.size)}`, 'busy', {
+    phase: 'model',
+    file: file.name,
+    bytes: blob.size,
+    elapsedMs,
+  });
+  return { name: file.name, data: blob, bytes: blob.size, elapsedMs };
+}
+
+async function mountExternalModel() {
+  if (modelMounted) return modelMountMetrics;
+  if (modelMountPromise) return modelMountPromise;
+
+  modelMountPromise = (async () => {
+    const started = performance.now();
+    const fs = resolveFs();
+    const workerFs = resolveWorkerFs();
+
+    // Load the large encoder first; decoder/joiner are small and can be fetched together afterwards.
+    const encoder = await fetchModelBlob(MODEL_FILES[0]);
+    const [decoder, joiner] = await Promise.all([
+      fetchModelBlob(MODEL_FILES[1]),
+      fetchModelBlob(MODEL_FILES[2]),
+    ]);
+    const blobs = [encoder, decoder, joiner];
+
+    postStatus('montage WORKERFS des poids ONNX…', 'busy', { phase: 'mount' });
+    try { fs.mkdir('/models'); } catch {}
+    try { fs.unmount('/models'); } catch {}
+    fs.mount(workerFs, {
+      blobs: blobs.map(({ name, data }) => ({ name, data })),
+    }, '/models');
+
+    for (const item of blobs) {
+      const path = `/models/${item.name}`;
+      const stat = fs.stat(path);
+      if (Number(stat.size) !== Number(item.bytes)) {
+        throw new Error(`${item.name}: taille WORKERFS inattendue (${stat.size} != ${item.bytes})`);
+      }
+    }
+
+    // Keep references for the lifetime of the worker. WORKERFS reads synchronously from these Blobs.
+    modelBlobs = blobs;
+    modelMounted = true;
+    modelMountMetrics = {
+      elapsedMs: performance.now() - started,
+      bytes: blobs.reduce((sum, item) => sum + item.bytes, 0),
+      files: blobs.map(({ name, bytes, elapsedMs }) => ({ name, bytes, elapsedMs })),
+    };
+
+    self.postMessage({ type: 'model-mounted', ...modelMountMetrics });
+    return modelMountMetrics;
+  })();
+
+  try {
+    return await modelMountPromise;
+  } finally {
+    modelMountPromise = null;
+  }
 }
 
 function normalizeHotwords(text) {
@@ -74,41 +190,31 @@ function normalizeHotwords(text) {
 
 function ensureRecognizer(hotwordsText, score) {
   if (!runtimeReady) throw new Error('Runtime sherpa-onnx pas encore prêt.');
+  if (!modelMounted) throw new Error('Les poids Parakeet ne sont pas encore montés dans WORKERFS.');
 
   const normalized = normalizeHotwords(hotwordsText);
   const hotwordScore = Number(score) || 1.5;
   const useHotwords = normalized.length > 0;
   const fingerprint = `${useHotwords ? 'beam' : 'greedy'}|${hotwordScore}|${normalized}`;
-  if (recognizer && fingerprint === recognizerFingerprint) return;
+  if (recognizer && fingerprint === recognizerFingerprint) return { reused: true, elapsedMs: 0 };
 
   try { recognizer?.free?.(); } catch {}
   recognizer = null;
 
+  const fs = resolveFs();
   if (useHotwords) {
-    // Emscripten's FS is a global in the classic WASM bundle. It is not
-    // guaranteed to be attached as Module.FS unless explicitly exported.
-    const emscriptenFS =
-      Module?.FS ||
-      self.FS ||
-      (typeof FS !== 'undefined' ? FS : null);
-
-    if (!emscriptenFS?.writeFile) {
-      throw new Error(
-        'Le runtime sherpa-onnx est chargé mais Emscripten FS.writeFile n\'est pas exposé. ' +
-        'Vérifie que le bundle WASM v1.13.5 a été construit avec le wrapper officiel.'
-      );
-    }
-    emscriptenFS.writeFile('/hotwords.txt', `${normalized}\n`);
+    fs.writeFile('/hotwords.txt', `${normalized}\n`);
   }
 
   const config = {
     featConfig: { sampleRate: 16000, featureDim: 80 },
     modelConfig: {
       transducer: {
-        encoder: './encoder.int8.onnx',
-        decoder: './decoder.int8.onnx',
-        joiner: './joiner.int8.onnx',
+        encoder: '/models/encoder.int8.onnx',
+        decoder: '/models/decoder.int8.onnx',
+        joiner: '/models/joiner.int8.onnx',
       },
+      // Small text assets remain preloaded in the tiny .data bundle.
       tokens: './tokens.txt',
       numThreads: 1,
       debug: 0,
@@ -125,27 +231,43 @@ function ensureRecognizer(hotwordsText, score) {
     debug: 0,
   };
 
-  postStatus(useHotwords ? 'création modified_beam_search + hotwords…' : 'création greedy_search…', 'busy');
+  postStatus(useHotwords ? 'création recognizer · modified_beam_search + hotwords…' : 'création recognizer · greedy_search…', 'busy', { phase: 'recognizer' });
+  const t0 = performance.now();
   recognizer = new OfflineRecognizer(config, Module);
+  const elapsedMs = performance.now() - t0;
   if (!recognizer?.handle) throw new Error('Impossible de créer OfflineRecognizer pour Parakeet.');
   recognizerFingerprint = fingerprint;
+  return { reused: false, elapsedMs };
 }
 
 self.onmessage = async (event) => {
   const msg = event.data || {};
   try {
     if (msg.type === 'init') {
+      const totalStart = performance.now();
+      const runtimeWaitStart = performance.now();
       await waitForRuntime();
-      ensureRecognizer(msg.hotwords, msg.hotwordScore);
+      const runtimeWaitMs = performance.now() - runtimeWaitStart;
+      const mountMetrics = await mountExternalModel();
+      const recognizerMetrics = ensureRecognizer(msg.hotwords, msg.hotwordScore);
       self.postMessage({
         type: 'ready',
         mode: normalizeHotwords(msg.hotwords) ? 'modified_beam_search' : 'greedy_search',
+        timings: {
+          runtimeWaitMs,
+          modelMountMs: mountMetrics?.elapsedMs || 0,
+          recognizerMs: recognizerMetrics.elapsedMs,
+          recognizerReused: recognizerMetrics.reused,
+          totalMs: performance.now() - totalStart,
+          modelBytes: mountMetrics?.bytes || 0,
+        },
       });
       return;
     }
 
     if (msg.type === 'transcribe') {
       await waitForRuntime();
+      await mountExternalModel();
       ensureRecognizer(msg.hotwords, msg.hotwordScore);
       const audio = new Float32Array(msg.audio);
       const stream = recognizer.createStream();

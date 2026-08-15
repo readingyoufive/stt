@@ -1,8 +1,15 @@
-1) Dézippe cette archive.
-2) Copie TOUT le contenu à la racine du dépôt GitHub, y compris .github/
-3) Commit + push sur main.
-4) GitHub > Settings > Pages > Source: GitHub Actions.
-5) GitHub > Actions > ouvre "Build STT demo and deploy Pages".
-6) Quand le job deploy est vert, ouvre l'URL Pages.
+STT v10 WORKERFS — upload GitHub
 
-Aucune compilation locale n'est nécessaire.
+1. Dézipper cette archive.
+2. Déposer TOUT le contenu à la racine du dépôt, y compris le dossier .github.
+3. Commit/push sur main.
+4. GitHub > Settings > Pages > Source : GitHub Actions.
+5. GitHub > Actions > ouvrir "Build STT demo and deploy Pages".
+
+Le premier build :
+- télécharge Parakeet v2 INT8 ;
+- compile sherpa-onnx 1.13.5 avec WORKERFS ;
+- publie le runtime .js/.wasm/.data séparément des trois fichiers ONNX ;
+- déploie le site.
+
+Aucune compilation n'est nécessaire sur le PC utilisateur.

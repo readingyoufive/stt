@@ -183,11 +183,19 @@ function ensureParakeetWorker() {
       setStatus('parakeetStatus', m.text || 'chargement…', m.status === 'ready' ? 'ready' : 'busy');
       setParakeetLoading(m.text || 'chargement…');
     } else if (m.type === 'runtime-ready') {
-      setParakeetLoading('runtime + modèle chargés, création du recognizer…');
+      setParakeetLoading('runtime WASM prêt · ouverture des poids ONNX externes…');
+    } else if (m.type === 'model-mounted') {
+      const mb = m.bytes ? (m.bytes / 1024 / 1024).toFixed(0) : '?';
+      setParakeetLoading(`poids ONNX montés via WORKERFS · ${mb} MB · création du recognizer…`);
     } else if (m.type === 'ready') {
       parakeetReady = true;
       setStatus('parakeetStatus', m.mode === 'modified_beam_search' ? 'prêt + hotwords' : 'prêt · greedy', 'ready');
       setParakeetDone(m.mode === 'modified_beam_search' ? 'Prêt · modified_beam_search' : 'Prêt · greedy_search');
+      if (m.timings) {
+        const t = m.timings;
+        $('parakeetInitMetrics').textContent =
+          `Initialisation : modèle externe ${(t.modelMountMs / 1000).toFixed(1)} s · recognizer ${(t.recognizerMs / 1000).toFixed(1)} s · total ${(t.totalMs / 1000).toFixed(1)} s`;
+      }
       parakeetInitResolve?.(m);
       parakeetInitResolve = parakeetInitReject = null;
     } else if (m.type === 'result') {
@@ -231,7 +239,7 @@ function initParakeet() {
     parakeetInitReject = reject;
     parakeetReady = false;
     setStatus('parakeetStatus', 'chargement…', 'busy');
-    setParakeetLoading('Téléchargement du runtime/model bundle…');
+    setParakeetLoading('Chargement du petit runtime WASM…');
     ensureParakeetWorker().postMessage({ type: 'init', ...currentParakeetConfig() });
   });
 }
@@ -249,7 +257,7 @@ initParakeetBtn.addEventListener('click', async () => {
   initParakeetBtn.disabled = true;
   try {
     await initParakeet();
-    $('parakeetDetail').textContent = 'Le bundle sherpa-onnx 1.13.5 + Parakeet est servi par ce même site GitHub Pages. L’audio reste local.';
+    $('parakeetDetail').textContent = 'Les poids ONNX sont servis séparément et montés en lecture seule via WORKERFS ; ils ne sont plus copiés dans le gros MEMFS/.data. L’audio reste local.';
   } catch (e) {
     $('parakeetDetail').textContent = e.message;
   } finally {

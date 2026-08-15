@@ -12,15 +12,15 @@
 <body>
   <main class="shell">
     <header>
-      <p class="eyebrow">v9 · GitHub-ready · sherpa-onnx officiel 1.13.5 · Browser CPU</p>
+      <p class="eyebrow">v10 · WORKERFS · sherpa-onnx officiel 1.13.5 · Browser CPU</p>
       <h1>Whisper base.en <span>vs</span> Parakeet v2 INT8</h1>
-      <p class="lede">Même audio micro, mono 16 kHz. Whisper tourne via Transformers.js/WASM. Parakeet utilise sherpa-onnx WebAssembly 1.13.5, compilé automatiquement par GitHub Actions avec <code>modified_beam_search</code> + contextual biasing.</p>
+      <p class="lede">Même audio micro, mono 16 kHz. Whisper tourne via Transformers.js/WASM. Parakeet utilise sherpa-onnx WebAssembly 1.13.5 avec <code>modified_beam_search</code> + contextual biasing. Les gros fichiers ONNX sont séparés du <code>.data</code> et montés via <code>WORKERFS</code>.</p>
     </header>
 
     <section class="panel architecture">
       <div><strong>Runtime Parakeet</strong><span>sherpa-onnx 1.13.5 officiel</span></div>
       <div><strong>Build</strong><span>GitHub Actions, jamais sur ton PC</span></div>
-      <div><strong>Poids Parakeet</strong><span>INT8 · ~661 MB</span></div>
+      <div><strong>Poids Parakeet</strong><span>INT8 · ~631–661 MB · fichiers externes</span></div>
       <div><strong>Audio</strong><span>reste dans le navigateur</span></div>
     </section>
 
@@ -53,7 +53,8 @@ MCALLISTER</textarea>
         <progress id="parakeetProgress" max="100" value="0"></progress>
         <span id="parakeetProgressText">Runtime non chargé</span>
       </div>
-      <p id="parakeetDetail" class="note">Au premier chargement, le navigateur récupère le bundle sherpa-onnx + modèle depuis ce même site GitHub Pages. Les chargements suivants peuvent bénéficier du cache HTTP du navigateur.</p>
+      <p id="parakeetInitMetrics" class="note">Les timings runtime / montage modèle / recognizer apparaîtront ici.</p>
+      <p id="parakeetDetail" class="note">Le runtime <code>.data</code> reste petit. Encoder/decoder/joiner sont servis comme fichiers ONNX séparés et montés en lecture seule avec WORKERFS. Le cache HTTP peut éviter leur retéléchargement.</p>
     </section>
 
     <section class="grid">
@@ -90,7 +91,7 @@ MCALLISTER</textarea>
 
     <section class="panel footnotes">
       <h2>Déploiement</h2>
-      <p>Dépose simplement tout ce projet dans ton dépôt GitHub et pousse sur <code>main</code>. Le workflow <code>.github/workflows/pages.yml</code> construit sherpa-onnx 1.13.5, prépare Parakeet v2 INT8, construit le frontend puis publie GitHub Pages.</p>
+      <p>Dépose simplement tout ce projet dans ton dépôt GitHub et pousse sur <code>main</code>. Le workflow <code>.github/workflows/pages.yml</code> construit sherpa-onnx 1.13.5 avec WORKERFS, publie le petit runtime séparément des poids ONNX, puis déploie GitHub Pages.</p>
       <p><strong>RTF</strong> = temps de calcul / durée audio. Un RTF de 0,20 signifie que 10 s d'audio prennent ~2 s à transcrire.</p>
       <p class="note">Le modèle Parakeet v2 est sous licence CC-BY-4.0. Les attributions et versions sont indiquées dans <code>THIRD_PARTY_NOTICES.md</code>.</p>
     </section>
