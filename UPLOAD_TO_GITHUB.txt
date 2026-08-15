@@ -13,3 +13,5 @@ Le premier build :
 - déploie le site.
 
 Aucune compilation n'est nécessaire sur le PC utilisateur.
+
+V10.1: remplacez tous les fichiers de la v10 puis commit/push sur main. Le runtime sherpa est reconstruit car la cle de cache a change.

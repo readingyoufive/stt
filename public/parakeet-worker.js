@@ -41,13 +41,26 @@ function resolveFs() {
 }
 
 function resolveWorkerFs() {
-  const workerFs = Module?.WORKERFS || self.WORKERFS || (typeof WORKERFS !== 'undefined' ? WORKERFS : null);
+  const fs = resolveFs();
+
+  // With Emscripten's legacy FS, linked filesystem backends are registered
+  // on FS.filesystems. This is the most reliable access path for WORKERFS.
+  const workerFs =
+    fs?.filesystems?.WORKERFS ||
+    Module?.FS?.filesystems?.WORKERFS ||
+    self.FS?.filesystems?.WORKERFS ||
+    Module?.WORKERFS ||
+    self.WORKERFS ||
+    (typeof WORKERFS !== 'undefined' ? WORKERFS : null);
+
   if (!workerFs) {
+    const backends = Object.keys(fs?.filesystems || {}).join(', ') || '(aucun)';
     throw new Error(
-      'WORKERFS n’est pas exposé. Le runtime doit être compilé avec -lworkerfs.js et ' +
-      "EXPORTED_RUNTIME_METHODS contenant 'FS' et 'WORKERFS'."
+      'WORKERFS n’est pas disponible dans ce runtime. Backends FS détectés: ' + backends + '. ' +
+      'Le runtime doit être lié avec -lworkerfs.js. Recharge la page après le nouveau déploiement v10.1.'
     );
   }
+
   return workerFs;
 }
 
