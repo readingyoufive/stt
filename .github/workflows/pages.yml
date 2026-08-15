@@ -17,7 +17,7 @@ concurrency:
 env:
   SHERPA_VERSION: v1.13.5
   EMSDK_VERSION: 4.0.23
-  WORKFLOW_REVISION: v10.6-workerfs-no-data
+  WORKFLOW_REVISION: v10.7-workerfs-diagnostics
   PARAKEET_MODEL: sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8
   PARAKEET_MODEL_URL: https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2
   PARAKEET_NEMO_URL: https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2/resolve/main/parakeet-tdt-0.6b-v2.nemo?download=true
@@ -33,7 +33,7 @@ jobs:
       - name: Show workflow revision
         run: |
           echo "WORKFLOW_REVISION=$WORKFLOW_REVISION"
-          echo "Expected: v10.6-workerfs-no-data"
+          echo "Expected: v10.7-workerfs-diagnostics"
 
       - name: Setup Node.js
         uses: actions/setup-node@v7
@@ -70,7 +70,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .cache/parakeet-runtime
-          key: parakeet-wasm-${{ env.SHERPA_VERSION }}-workerfs-v10.6
+          key: parakeet-wasm-${{ env.SHERPA_VERSION }}-workerfs-v10.7
 
       - name: Restore BPE vocab cache
         id: bpe-cache
@@ -129,7 +129,7 @@ jobs:
           find "$ASSETS" -mindepth 1 ! -name README.md -exec rm -rf {} +
 
           # These files satisfy sherpa's configure-time checks only.
-          # v10.6 removes --preload-file, so no Emscripten .data is generated.
+          # v10.7 removes --preload-file, so no Emscripten .data is generated.
           # At runtime these support files are served separately and mounted via WORKERFS.
           cp .cache/parakeet-model/tokens.txt "$ASSETS/tokens.txt"
           cp .cache/parakeet-bpe/bpe.vocab "$ASSETS/bpe.vocab"
@@ -176,7 +176,7 @@ jobs:
           s = s.replace(marker, addition, 1)
 
           # sherpa's upstream install list assumes --preload-file generated a
-          # .data file. Since v10.6 intentionally has no .data, remove only
+          # .data file. Since v10.7 intentionally has no .data, remove only
           # that install entry.
           data_install = '    "$<TARGET_FILE_DIR:sherpa-onnx-wasm-main-vad-asr>/sherpa-onnx-wasm-main-vad-asr.data"\n'
           if data_install not in s:
@@ -239,7 +239,7 @@ jobs:
           fi
           echo "WORKERFS found in generated runtime"
 
-          # v10.6 deliberately has no Emscripten .data package at all.
+          # v10.7 deliberately has no Emscripten .data package at all.
           echo "OK: no Emscripten .data package generated"
 
           mkdir -p ../../.cache/parakeet-runtime
